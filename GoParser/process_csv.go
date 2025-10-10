@@ -125,6 +125,23 @@ func populateStateFromZip(row []string) {
 	}
 }
 
+// --- ZIP SANITIZER ---
+func sanitizeZip(zip string) string {
+	re := regexp.MustCompile(`\D`)
+	zip = re.ReplaceAllString(zip, "") // remove non-digits
+
+	// Too short or starts with 0 or empty → invalid
+	if len(zip) < 5 || strings.HasPrefix(zip, "0") {
+		return ""
+	}
+
+	// Truncate to 5 digits if longer
+	if len(zip) > 5 {
+		zip = zip[:5]
+	}
+	return zip
+}
+
 func populateStateZipFromAreaCode(row []string) {
 	if len(row[8]) < 3 {
 		return
@@ -162,7 +179,7 @@ func processCSV(inFile, outFile string) error {
 		}
 		row[8] = cleanPhone(row[8])
 		row[6] = normalizeState(row[6])
-		row[7] = truncateZip(row[7])
+		row[7] = sanitizeZip(row[7])
 
 		if row[7] == "" && row[6] != "" {
 			populateZip(row)

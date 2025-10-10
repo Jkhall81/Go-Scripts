@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func (ds *DataSet) FirstNLines(n int) []string {
+func (ds *DataSet) FirstNLines(n int, availableWidth int) []string {
 	if ds == nil {
 		return []string{"Dataset is nil."}
 	}
@@ -18,44 +18,27 @@ func (ds *DataSet) FirstNLines(n int) []string {
 		limit = len(ds.Rows)
 	}
 
-	const maxColWidth = 25
-	colWidths := make([]int, len(ds.Headers))
-	for j, h := range ds.Headers {
-		colWidths[j] = len(h)
-		if colWidths[j] > maxColWidth {
-			colWidths[j] = maxColWidth
-		}
-	}
-	for _, row := range ds.Rows[:limit] {
-		for j, val := range row {
-			if j < len(colWidths) {
-				if l := len(val); l > colWidths[j] {
-					colWidths[j] = min(l, maxColWidth)
-				}
-			}
-		}
-	}
+	// Calculate column widths optimized for the available width
+	colWidths := calculateAdaptiveColumnWidths(ds.Headers, ds.Rows[:limit], availableWidth)
 
 	lines := []string{}
-	lines = append(lines, fmt.Sprintf("Loaded %d rows from %s", len(ds.Rows), ds.Source))
 
-	// header
+	// Header row
 	header := "|"
 	for j, h := range ds.Headers {
-		width := min(colWidths[j], maxColWidth)
-		header += fmt.Sprintf(" %-*.*s |", width, width, h)
+		width := colWidths[j]
+		header += fmt.Sprintf(" %-*s |", width, h)
 	}
 	lines = append(lines, header)
 
-	// separator
+	// Separator
 	sep := "+"
 	for _, w := range colWidths {
-		w = min(w, maxColWidth)
 		sep += strings.Repeat("-", w+2) + "+"
 	}
 	lines = append(lines, sep)
 
-	// data rows
+	// Data rows
 	for i := 0; i < limit; i++ {
 		row := ds.Rows[i]
 		line := "|"
@@ -64,19 +47,101 @@ func (ds *DataSet) FirstNLines(n int) []string {
 			if j < len(row) {
 				val = strings.ReplaceAll(row[j], "\n", " ")
 			}
-			width := min(colWidths[j], maxColWidth)
-			line += fmt.Sprintf(" %-*.*s |", width, width, val)
+			width := colWidths[j]
+			// Truncate only if necessary
+			if len(val) > width {
+				val = val[:width-3] + "..."
+			}
+			line += fmt.Sprintf(" %-*s |", width, val)
 		}
 		lines = append(lines, line)
 	}
 
 	lines = append(lines, fmt.Sprintf("Showing %d of %d rows from %s", limit, len(ds.Rows), ds.Source))
+
+	totalWidth := calculateTotalTableWidth(colWidths)
+	lines = append(lines, fmt.Sprintf("Table width: %d characters (available: %d)", totalWidth, availableWidth))
+
 	return lines
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// calculateAdaptiveColumnWidths optimizes column widths for the available space
+func calculateAdaptiveColumnWidths(headers []string, rows [][]string, availableWidth int) []int {
+	colWidths := make([]int, len(headers))
+
+	// First pass: calculate ideal widths from data
+	for j, h := range headers {
+		colWidths[j] = len(h)
 	}
-	return b
+
+	for _, row := range rows {
+		for j, val := range row {
+			if j < len(colWidths) && len(val) > colWidths[j] {
+				colWidths[j] = len(val)
+			}
+		}
+	}
+
+	// Calculate total ideal width
+	totalIdealWidth := calculateTotalTableWidth(colWidths)
+
+	// If table fits in available width, use ideal widths
+	if totalIdealWidth <= availableWidth {
+		return colWidths
+	}
+
+	// If too wide, scale down proportionally
+	scaleFactor := float64(availableWidth) / float64(totalIdealWidth)
+
+	// Apply scaling with minimum widths
+	for j := range colWidths {
+		scaledWidth := int(float64(colWidths[j]) * scaleFactor)
+		// Ensure minimum readable width
+		if scaledWidth < 8 {
+			scaledWidth = 8
+		}
+		// Don't scale below header width
+		if scaledWidth < len(headers[j]) {
+			scaledWidth = len(headers[j])
+		}
+		colWidths[j] = scaledWidth
+	}
+
+	// Final adjustment to ensure we don't exceed max width
+	finalWidth := calculateTotalTableWidth(colWidths)
+	if finalWidth > availableWidth {
+		// Trim the widest column until it fits
+		for finalWidth > availableWidth {
+			maxWidthIndex := -1
+			maxWidth := 0
+			for j, width := range colWidths {
+				if width > maxWidth && width > len(headers[j]) {
+					maxWidth = width
+					maxWidthIndex = j
+				}
+			}
+			if maxWidthIndex == -1 {
+				break // Can't reduce further without cutting headers
+			}
+			colWidths[maxWidthIndex]--
+			finalWidth = calculateTotalTableWidth(colWidths)
+		}
+	}
+
+	return colWidths
+}
+
+// calculateTotalTableWidth calculates the total character width of the table
+func calculateTotalTableWidth(colWidths []int) int {
+	if len(colWidths) == 0 {
+		return 0
+	}
+
+	total := 0
+	for _, width := range colWidths {
+		total += width + 3 // +3 for " | " between columns
+	}
+	total += 1 // for the starting "|"
+
+	return total
 }
