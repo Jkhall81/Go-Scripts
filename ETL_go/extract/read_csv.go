@@ -31,6 +31,7 @@ func ReadCSV(path string) (*DataSet, error) {
 	reader := csv.NewReader(f)
 	reader.FieldsPerRecord = -1 // allow variable-length rows
 	reader.TrimLeadingSpace = true
+	reader.LazyQuotes = true
 
 	// --- Read all rows ---
 	rawRows, err := reader.ReadAll()

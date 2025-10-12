@@ -3,6 +3,8 @@ package extract
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func (ds *DataSet) FirstNLines(n int, availableWidth int) []string {
@@ -18,12 +20,20 @@ func (ds *DataSet) FirstNLines(n int, availableWidth int) []string {
 		limit = len(ds.Rows)
 	}
 
-	// Calculate column widths optimized for the available width
+	// --- Calculate column widths ---
 	colWidths := calculateAdaptiveColumnWidths(ds.Headers, ds.Rows[:limit], availableWidth)
-
 	lines := []string{}
 
-	// Header row
+	// --- 🆕 Zero-indexed column numbers (above header, blue) ---
+	indexLine := "|"
+	for j := range ds.Headers {
+		width := colWidths[j]
+		indexLine += fmt.Sprintf(" %-*d |", width, j)
+	}
+	blue := lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	lines = append(lines, blue.Render(indexLine))
+
+	// --- Header row ---
 	header := "|"
 	for j, h := range ds.Headers {
 		width := colWidths[j]
@@ -31,14 +41,14 @@ func (ds *DataSet) FirstNLines(n int, availableWidth int) []string {
 	}
 	lines = append(lines, header)
 
-	// Separator
+	// --- Separator line ---
 	sep := "+"
 	for _, w := range colWidths {
 		sep += strings.Repeat("-", w+2) + "+"
 	}
 	lines = append(lines, sep)
 
-	// Data rows
+	// --- Data rows ---
 	for i := 0; i < limit; i++ {
 		row := ds.Rows[i]
 		line := "|"
@@ -48,19 +58,25 @@ func (ds *DataSet) FirstNLines(n int, availableWidth int) []string {
 				val = strings.ReplaceAll(row[j], "\n", " ")
 			}
 			width := colWidths[j]
-			// Truncate only if necessary
 			if len(val) > width {
-				val = val[:width-3] + "..."
+				if width > 3 {
+					val = val[:width-3] + "..."
+				} else if width > 0 {
+					val = val[:width]
+				} else {
+					val = ""
+				}
 			}
 			line += fmt.Sprintf(" %-*s |", width, val)
 		}
 		lines = append(lines, line)
 	}
 
-	lines = append(lines, fmt.Sprintf("Showing %d of %d rows from %s", limit, len(ds.Rows), ds.Source))
-
-	totalWidth := calculateTotalTableWidth(colWidths)
-	lines = append(lines, fmt.Sprintf("Table width: %d characters (available: %d)", totalWidth, availableWidth))
+	lines = append(lines,
+		fmt.Sprintf("Showing %d of %d rows from %s", limit, len(ds.Rows), ds.Source),
+		fmt.Sprintf("Table width: %d characters (available: %d)",
+			calculateTotalTableWidth(colWidths), availableWidth),
+	)
 
 	return lines
 }
@@ -125,6 +141,12 @@ func calculateAdaptiveColumnWidths(headers []string, rows [][]string, availableW
 			}
 			colWidths[maxWidthIndex]--
 			finalWidth = calculateTotalTableWidth(colWidths)
+		}
+	}
+
+	for j := range colWidths {
+		if colWidths[j] < 1 {
+			colWidths[j] = 1
 		}
 	}
 

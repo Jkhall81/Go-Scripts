@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"etl_go/extract"
 )
@@ -79,6 +80,61 @@ func truncateZip(zip string) string {
 	return zip
 }
 
+// isValidZip checks if a zip code is valid (5 digits, all numeric)
+func isValidZip(zip string) bool {
+	if len(zip) != 5 {
+		return false
+	}
+	for _, char := range zip {
+		if !unicode.IsDigit(char) {
+			return false
+		}
+	}
+	return true
+}
+
+// hasLetters checks if a string contains any letters
+func hasLetters(s string) bool {
+	for _, char := range s {
+		if unicode.IsLetter(char) {
+			return true
+		}
+	}
+	return false
+}
+
+// cleanZipCode removes invalid zip codes and returns a clean version or empty string
+func cleanZipCode(zip string) string {
+	zip = strings.TrimSpace(zip)
+
+	// If it contains letters, it's invalid
+	if hasLetters(zip) {
+		return ""
+	}
+
+	// Extract only digits
+	var digits strings.Builder
+	for _, char := range zip {
+		if unicode.IsDigit(char) {
+			digits.WriteRune(char)
+		}
+	}
+
+	cleaned := digits.String()
+
+	// If it's too short (less than 5 digits), it's invalid
+	if len(cleaned) < 5 {
+		return ""
+	}
+
+	// Truncate to 5 digits if longer
+	if len(cleaned) > 5 {
+		cleaned = cleaned[:5]
+	}
+
+	return cleaned
+}
+
 func populateZip(row []string) {
 	state := row[6]
 	if state != "" && row[7] == "" {
@@ -131,19 +187,45 @@ func PopulateGeo(ds *extract.DataSet) *extract.DataSet {
 		return ds
 	}
 
+	stats := struct {
+		cleanedLetters  int
+		cleanedTooShort int
+		populatedZip    int
+		populatedState  int
+	}{}
+
 	newRows := make([][]string, len(ds.Rows))
 	for i, row := range ds.Rows {
 		newRow := make([]string, len(row))
 		copy(newRow, row)
 
 		newRow[6] = normalizeState(newRow[6])
-		newRow[7] = truncateZip(newRow[7])
 
+		// Clean the zip code first
+		originalZip := newRow[7]
+		newRow[7] = cleanZipCode(newRow[7])
+
+		// Track what we cleaned
+		if originalZip != "" && newRow[7] == "" {
+			if hasLetters(originalZip) {
+				stats.cleanedLetters++
+			} else {
+				stats.cleanedTooShort++
+			}
+		}
+
+		// Now populate missing data
 		if newRow[7] == "" && newRow[6] != "" {
 			populateZip(newRow)
+			if newRow[7] != "" {
+				stats.populatedZip++
+			}
 		}
 		if newRow[6] == "" && newRow[7] != "" {
 			populateStateFromZip(newRow)
+			if newRow[6] != "" {
+				stats.populatedState++
+			}
 		}
 		if (newRow[6] == "" || len(newRow[6]) != 2) && newRow[7] == "" {
 			populateStateZipFromAreaCode(newRow)
@@ -152,7 +234,10 @@ func PopulateGeo(ds *extract.DataSet) *extract.DataSet {
 		newRows[i] = newRow
 	}
 
-	fmt.Println("Geographic fields populated successfully.")
+	fmt.Printf("Geographic fields populated successfully. ")
+	fmt.Printf("Cleaned %d zip codes with letters, %d too short. ", stats.cleanedLetters, stats.cleanedTooShort)
+	fmt.Printf("Populated %d missing zips, %d missing states.\n", stats.populatedZip, stats.populatedState)
+
 	return &extract.DataSet{
 		Headers: ds.Headers,
 		Rows:    newRows,

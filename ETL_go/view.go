@@ -124,6 +124,7 @@ func (m model) renderLegend() string {
 		"  show ............ preview first 5 rows",
 		"  drop <indexes> .. remove columns",
 		"  clean-address ... sanitize address fields",
+		"  clean-names ..... remove numbers & special chars from names",
 		"  normalize-phones. format phone numbers",
 		"  populate-geo .... fill missing geo fields",
 		"  validate-states . drop non-US states",

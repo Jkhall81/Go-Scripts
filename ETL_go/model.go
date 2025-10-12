@@ -35,6 +35,7 @@ func initialModel(inputFile string) model {
 		{name: "Extract CSV/XLSX", status: false},
 		{name: "Drop Columns", status: false},
 		{name: "Clean Addresses", status: false},
+		{name: "Clean Names", status: false},
 		{name: "Normalize Phones", status: false},
 		{name: "Populate Geo", status: false},
 		{name: "Validate States", status: false},
@@ -164,6 +165,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) processCommand(cmd string) (tea.Model, tea.Cmd) {
+	m.outputLines = []string{}
 	m.outputLines = append(m.outputLines, fmt.Sprintf("> %s", cmd))
 
 	args := strings.Fields(cmd)
@@ -173,17 +175,8 @@ func (m model) processCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	switch strings.ToLower(args[0]) {
 	case "show":
-		m.outputLines = m.removePreviewLines(m.outputLines)
 		previewLines := m.dataset.FirstNLines(5, m.width-35)
-
-		// Filter out the "Loaded..." line if it's already in the preview
-		filteredLines := []string{}
-		for _, line := range previewLines {
-			if !strings.Contains(line, "Loaded") || !strings.Contains(line, "rows from") {
-				filteredLines = append(filteredLines, line)
-			}
-		}
-		m.outputLines = append(m.outputLines, filteredLines...)
+		m.outputLines = append(m.outputLines, previewLines...)
 
 	case "drop":
 		if len(args) < 2 {
@@ -206,33 +199,38 @@ func (m model) processCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.steps[2].status = true
 		m.outputLines = append(m.outputLines, "Cleaned address fields.")
 
+	case "clean-names":
+		m.dataset = transform.CleanNames(m.dataset)
+		m.steps[3].status = true
+		m.outputLines = append(m.outputLines, "Cleaned name fields.")
+
 	case "normalize-phones":
 		m.dataset = transform.NormalizePhones(m.dataset)
-		m.steps[3].status = true
+		m.steps[4].status = true
 		m.outputLines = append(m.outputLines, "Normalized phone numbers.")
 
 	case "populate-geo":
 		m.dataset = transform.PopulateGeo(m.dataset)
-		m.steps[4].status = true
+		m.steps[5].status = true
 		m.outputLines = append(m.outputLines, "Populated missing state/ZIP data.")
 
 	case "validate-states":
 		result := transform.ValidateStates(m.dataset)
 		m.dataset = result.Cleaned
-		m.steps[5].status = true
+		m.steps[6].status = true
 		m.outputLines = append(m.outputLines, fmt.Sprintf("Removed %d invalid-state rows.", result.DropCount))
 
 	case "final-validate":
 		result := load.FinalValidate(m.dataset)
 		m.dataset = result.Cleaned
-		m.steps[6].status = true
+		m.steps[7].status = true
 		m.outputLines = append(m.outputLines, fmt.Sprintf("Removed %d invalid rows.", result.DropCount))
 
 	case "write-csv":
 		if err := load.WriteCSV(m.dataset, ""); err != nil {
 			m.outputLines = append(m.outputLines, fmt.Sprintf("Error writing CSV: %v", err))
 		} else {
-			m.steps[7].status = true
+			m.steps[8].status = true
 			m.outputLines = append(m.outputLines, "Output CSV written successfully.")
 		}
 
@@ -241,9 +239,9 @@ func (m model) processCommand(cmd string) (tea.Model, tea.Cmd) {
 			TotalProcessed: len(m.dataset.Rows),
 			FinalRowCount:  len(m.dataset.Rows),
 		}
-		load.WriteReport(report)
-		m.steps[8].status = true
-		m.outputLines = append(m.outputLines, "Report generated successfully.")
+		reportLines := load.WriteReport(report)
+		m.outputLines = append(m.outputLines, reportLines...)
+		m.steps[9].status = true
 
 	case "help":
 		m.outputLines = append(m.outputLines, "Available commands:")
