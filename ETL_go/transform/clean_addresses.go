@@ -35,7 +35,6 @@ func CleanAddresses(ds *extract.DataSet) *extract.DataSet {
 		newRows[i] = newRow
 	}
 
-	fmt.Println("Address1 fields cleaned successfully.")
 	return &extract.DataSet{
 		Headers: ds.Headers,
 		Rows:    newRows,

@@ -48,12 +48,6 @@ func FinalValidate(ds *extract.DataSet) *FinalValidationResult {
 
 	dropCount := len(dropped)
 
-	if dropCount > 0 {
-		fmt.Printf("%d rows removed due to missing required fields (phone/name).\n", dropCount)
-	} else {
-		fmt.Println("All rows passed final validation.")
-	}
-
 	cleaned := &extract.DataSet{
 		Headers: ds.Headers,
 		Rows:    validRows,

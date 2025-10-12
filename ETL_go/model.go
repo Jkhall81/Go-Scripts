@@ -10,6 +10,7 @@ import (
 	"etl_go/extract"
 	"etl_go/load"
 	"etl_go/transform"
+	"etl_go/types"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -23,6 +24,7 @@ type model struct {
 	dataset     *extract.DataSet
 	focused     string
 	scroll      scrollModel
+	geoStats   	types.GeoStats
 }
 
 type step struct {
@@ -37,6 +39,7 @@ func initialModel(inputFile string) model {
 		{name: "Clean Addresses", status: false},
 		{name: "Clean Names", status: false},
 		{name: "Normalize Phones", status: false},
+		{name: "Deduplicate Phones", status: false},
 		{name: "Populate Geo", status: false},
 		{name: "Validate States", status: false},
 		{name: "Final Validation", status: false},
@@ -209,39 +212,104 @@ func (m model) processCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.steps[4].status = true
 		m.outputLines = append(m.outputLines, "Normalized phone numbers.")
 
-	case "populate-geo":
-		m.dataset = transform.PopulateGeo(m.dataset)
+	case "dedup-phones":
+		result := transform.DedupPhones(m.dataset)
+		m.dataset = result.Cleaned
 		m.steps[5].status = true
+		m.outputLines = append(m.outputLines, fmt.Sprintf("Removed %d duplicate phone rows.", result.Duplicates))
+
+	case "populate-geo":
+		ds, stats := transform.PopulateGeo(m.dataset)
+		m.dataset = ds
+		m.geoStats = stats  // Store the stats
+		m.steps[6].status = true
 		m.outputLines = append(m.outputLines, "Populated missing state/ZIP data.")
 
 	case "validate-states":
 		result := transform.ValidateStates(m.dataset)
 		m.dataset = result.Cleaned
-		m.steps[6].status = true
+		m.steps[7].status = true
 		m.outputLines = append(m.outputLines, fmt.Sprintf("Removed %d invalid-state rows.", result.DropCount))
 
 	case "final-validate":
 		result := load.FinalValidate(m.dataset)
 		m.dataset = result.Cleaned
-		m.steps[7].status = true
+		m.steps[8].status = true
 		m.outputLines = append(m.outputLines, fmt.Sprintf("Removed %d invalid rows.", result.DropCount))
 
 	case "write-csv":
 		if err := load.WriteCSV(m.dataset, ""); err != nil {
 			m.outputLines = append(m.outputLines, fmt.Sprintf("Error writing CSV: %v", err))
 		} else {
-			m.steps[8].status = true
+			m.steps[9].status = true
 			m.outputLines = append(m.outputLines, "Output CSV written successfully.")
 		}
 
 	case "write-report":
 		report := load.ReportSummary{
-			TotalProcessed: len(m.dataset.Rows),
-			FinalRowCount:  len(m.dataset.Rows),
+		TotalProcessed: len(m.dataset.Rows),
+		FinalRowCount:  len(m.dataset.Rows),
+		GeoStats:       m.geoStats,  // Add the geo stats
 		}
 		reportLines := load.WriteReport(report)
 		m.outputLines = append(m.outputLines, reportLines...)
-		m.steps[9].status = true
+		m.steps[10].status = true
+	
+	case "clean-all":
+		// Run the entire pipeline automatically
+		m.outputLines = append(m.outputLines, "Starting automated ETL pipeline...")
+		
+		// Clean addresses
+		m.dataset = transform.CleanAddresses(m.dataset)
+		m.steps[2].status = true
+		m.outputLines = append(m.outputLines, "Cleaned address fields.")
+		
+		// Clean names
+		m.dataset = transform.CleanNames(m.dataset)
+		m.steps[3].status = true
+		m.outputLines = append(m.outputLines, "Cleaned name fields.")
+		
+		// Normalize phones
+		m.dataset = transform.NormalizePhones(m.dataset)
+		m.steps[4].status = true
+		m.outputLines = append(m.outputLines, "Normalized phone numbers.")
+		
+		// Deduplicate phones
+		result := transform.DedupPhones(m.dataset)
+		m.dataset = result.Cleaned
+		m.steps[5].status = true
+		m.outputLines = append(m.outputLines, fmt.Sprintf("Removed %d duplicate phone rows.", result.Duplicates))
+		
+		// Populate geo
+		ds, stats := transform.PopulateGeo(m.dataset)
+		m.dataset = ds
+		m.geoStats = stats
+		m.steps[6].status = true
+		m.outputLines = append(m.outputLines, "Populated missing state/ZIP data.")
+		
+		// Validate states
+		stateResult := transform.ValidateStates(m.dataset)
+		m.dataset = stateResult.Cleaned
+		m.steps[7].status = true
+		m.outputLines = append(m.outputLines, fmt.Sprintf("Removed %d invalid-state rows.", stateResult.DropCount))
+		
+		// Final validation
+		finalResult := load.FinalValidate(m.dataset)
+		m.dataset = finalResult.Cleaned
+		m.steps[8].status = true
+		m.outputLines = append(m.outputLines, fmt.Sprintf("Removed %d invalid rows.", finalResult.DropCount))
+		
+		// Generate report
+		report := load.ReportSummary{
+			TotalProcessed: len(m.dataset.Rows),
+			FinalRowCount:  len(m.dataset.Rows),
+			GeoStats:       m.geoStats,
+		}
+		reportLines := load.WriteReport(report)
+		m.outputLines = append(m.outputLines, reportLines...)
+		m.steps[10].status = true
+		
+		m.outputLines = append(m.outputLines, "Automated cleaning complete! Use 'write-csv' to export the final dataset.")
 
 	case "help":
 		m.outputLines = append(m.outputLines, "Available commands:")
@@ -257,33 +325,4 @@ func (m model) processCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	m.input = ""
 	return m, nil
-}
-
-func (m model) removePreviewLines(lines []string) []string {
-	var result []string
-	inPreview := false
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "> show") {
-			result = append(result, line)
-			inPreview = true
-			continue
-		}
-
-		if inPreview {
-			if strings.Contains(line, "Loaded") && strings.Contains(line, "rows from") && len(result) > 0 {
-				continue
-			}
-			if strings.Contains(line, "Showing") && strings.Contains(line, "rows from") {
-				inPreview = false
-				continue
-			}
-			if strings.HasPrefix(line, "|") || strings.HasPrefix(line, "+") {
-				continue
-			}
-		}
-
-		result = append(result, line)
-	}
-	return result
 }

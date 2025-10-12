@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"etl_go/extract"
+	"etl_go/types"
 )
 
 // --- STATE → ZIP ---
@@ -71,26 +72,6 @@ var stateAreaCodes = map[string][]string{
 // --- HELPERS ---
 func normalizeState(state string) string {
 	return strings.ToUpper(strings.TrimSpace(state))
-}
-
-func truncateZip(zip string) string {
-	if len(zip) > 5 {
-		return zip[:5]
-	}
-	return zip
-}
-
-// isValidZip checks if a zip code is valid (5 digits, all numeric)
-func isValidZip(zip string) bool {
-	if len(zip) != 5 {
-		return false
-	}
-	for _, char := range zip {
-		if !unicode.IsDigit(char) {
-			return false
-		}
-	}
-	return true
 }
 
 // hasLetters checks if a string contains any letters
@@ -181,18 +162,13 @@ func populateStateZipFromAreaCode(row []string) {
 }
 
 // --- MAIN TRANSFORM FUNCTION ---
-func PopulateGeo(ds *extract.DataSet) *extract.DataSet {
+func PopulateGeo(ds *extract.DataSet) (*extract.DataSet, types.GeoStats) {
 	if ds == nil {
 		fmt.Println("No dataset loaded.")
-		return ds
+		return ds, types.GeoStats{}
 	}
 
-	stats := struct {
-		cleanedLetters  int
-		cleanedTooShort int
-		populatedZip    int
-		populatedState  int
-	}{}
+	stats := types.GeoStats{}
 
 	newRows := make([][]string, len(ds.Rows))
 	for i, row := range ds.Rows {
@@ -208,39 +184,103 @@ func PopulateGeo(ds *extract.DataSet) *extract.DataSet {
 		// Track what we cleaned
 		if originalZip != "" && newRow[7] == "" {
 			if hasLetters(originalZip) {
-				stats.cleanedLetters++
+				stats.CleanedZipLetters++
 			} else {
-				stats.cleanedTooShort++
+				stats.CleanedZipTooShort++
 			}
 		}
 
-		// Now populate missing data
-		if newRow[7] == "" && newRow[6] != "" {
-			populateZip(newRow)
-			if newRow[7] != "" {
-				stats.populatedZip++
+		// Check for ZIP-State mismatch and correct it
+		hadMismatch := false
+		if newRow[6] != "" && newRow[7] != "" && isValidZip(newRow[7]) {
+			if !isValidZipForState(newRow[7], newRow[6]) {
+				// ZIP doesn't belong to this state - try to find correct state
+				if correctedState := findStateFromZip(newRow[7]); correctedState != "" {
+					newRow[6] = correctedState
+					stats.CorrectedMismatches++
+					hadMismatch = true
+				}
 			}
 		}
-		if newRow[6] == "" && newRow[7] != "" {
-			populateStateFromZip(newRow)
-			if newRow[6] != "" {
-				stats.populatedState++
+
+		// Now populate missing data (only if we didn't just correct a mismatch)
+		if !hadMismatch {
+			if newRow[7] == "" && newRow[6] != "" {
+				populateZip(newRow)
+				if newRow[7] != "" {
+					stats.PopulatedZip++
+				}
 			}
-		}
-		if (newRow[6] == "" || len(newRow[6]) != 2) && newRow[7] == "" {
-			populateStateZipFromAreaCode(newRow)
+			if newRow[6] == "" && newRow[7] != "" {
+				populateStateFromZip(newRow)
+				if newRow[6] != "" {
+					stats.PopulatedState++
+				}
+			}
+			if (newRow[6] == "" || len(newRow[6]) != 2) && newRow[7] == "" {
+				populateStateZipFromAreaCode(newRow)
+				if newRow[6] != "" && newRow[7] != "" {
+					stats.FixedFromAreaCode++
+				}
+			}
 		}
 
 		newRows[i] = newRow
 	}
 
-	fmt.Printf("Geographic fields populated successfully. ")
-	fmt.Printf("Cleaned %d zip codes with letters, %d too short. ", stats.cleanedLetters, stats.cleanedTooShort)
-	fmt.Printf("Populated %d missing zips, %d missing states.\n", stats.populatedZip, stats.populatedState)
-
 	return &extract.DataSet{
 		Headers: ds.Headers,
 		Rows:    newRows,
 		Source:  ds.Source,
+	}, stats
+}
+
+// Helper function to find state from ZIP
+func findStateFromZip(zipStr string) string {
+	zipInt, err := strconv.Atoi(zipStr)
+	if err != nil {
+		return ""
 	}
+
+	for state, ranges := range zipCodeRanges {
+		for _, r := range ranges {
+			if zipInt >= r[0] && zipInt <= r[1] {
+				return state
+			}
+		}
+	}
+	return ""
+}
+
+// isValidZip checks if a zip code is valid (5 digits, all numeric)
+func isValidZip(zip string) bool {
+    if len(zip) != 5 {
+        return false
+    }
+    for _, char := range zip {
+        if !unicode.IsDigit(char) {
+            return false
+        }
+    }
+    return true
+}
+
+// isValidZipForState checks if a ZIP code belongs to the given state
+func isValidZipForState(zipStr, state string) bool {
+    zipInt, err := strconv.Atoi(zipStr)
+    if err != nil {
+        return false
+    }
+
+    ranges, exists := zipCodeRanges[state]
+    if !exists {
+        return false
+    }
+
+    for _, r := range ranges {
+        if zipInt >= r[0] && zipInt <= r[1] {
+            return true
+        }
+    }
+    return false
 }

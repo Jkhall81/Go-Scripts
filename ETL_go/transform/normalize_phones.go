@@ -46,7 +46,6 @@ func NormalizePhones(ds *extract.DataSet) *extract.DataSet {
 		newRows[i] = newRow
 	}
 
-	fmt.Println("Phone numbers normalized successfully.")
 	return &extract.DataSet{
 		Headers: ds.Headers,
 		Rows:    newRows,

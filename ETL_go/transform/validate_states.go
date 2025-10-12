@@ -58,12 +58,6 @@ func ValidateStates(ds *extract.DataSet) *ValidationResult {
 
 	dropCount := len(dropped)
 
-	if dropCount > 0 {
-		fmt.Printf("%d invalid state rows removed.\n", dropCount)
-	} else {
-		fmt.Println("All rows have valid state codes.")
-	}
-
 	cleaned := &extract.DataSet{
 		Headers: ds.Headers,
 		Rows:    validRows,
