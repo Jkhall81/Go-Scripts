@@ -125,6 +125,7 @@ func (m model) renderLegend() string {
 		"  drop <indexes> .. remove columns",
 		"  clean-address ... sanitize address fields",
 		"  clean-names ..... remove numbers & special chars from names",
+		"  clean-email ..... make sure there are no numeric values",
 		"  normalize-phones. format phone numbers",
 		"  dedup-phones .... remove duplicate phone numbers",
 		"  populate-geo .... fill missing geo fields",
