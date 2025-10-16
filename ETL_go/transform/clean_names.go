@@ -16,9 +16,9 @@ func CleanNames(ds *extract.DataSet) *extract.DataSet {
 	}
 
 	// Name column indices (0-based) - adjust these based on your actual column positions
-	const firstNameIdx = 0
-	const middleNameIdx = 1
-	const lastNameIdx = 2
+	const firstNameIdx = 1
+	const middleNameIdx = 2
+	const lastNameIdx = 3
 
 	// Regex: keep only letters, spaces, hyphens, and apostrophes for names
 	re := regexp.MustCompile(`[^A-Za-z\s\-']`)
